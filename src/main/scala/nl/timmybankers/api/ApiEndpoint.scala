@@ -17,88 +17,30 @@ import io.finch.request._
 import io.finch.response._
 import io.finch.route._
 import nl.timmybankers.api.Model._
-
-import scala.collection.mutable
-
-object Model {
-  case class Api(id: String,
-                 title: String,
-                 description: String,
-                 state: State,
-                 owner: String)
-    extends CaseClassReflector
-
-  sealed trait State
-  case object Proposed extends State
-  case object Designed extends State
-  case object Development extends State
-  case object Production extends State
+import nl.timmybankers.api.stores.InMemoryStore
 
 
-  //Helper
-  trait CaseClassReflector extends Product {
-    def getFields: Map[String, AnyRef] =
-      getClass.getDeclaredFields.map(field => {
-        field setAccessible true
-        field.getName -> field.get(this)
-      }).toMap
-  }
-
-}
-
-object ApiEndpoint extends TwitterServer {
+object ApiEndpoint extends TwitterServer with InMemoryStore {
 
   val port: Flag[Int] = flag("port", 8081, "TCP port for HTTP server")
 
   val path = "api"
 
-  object Apis {
-    private[this] val db: mutable.Map[String, Api] = mutable.Map.empty[String, Api]
-
-    def get(id: String): Option[Api] = synchronized {
-      db.get(id)
-    }
-
-    def list(): List[Api] = synchronized {
-      db.values.toList
-    }
-
-    def save(t: Api): Unit = synchronized {
-      db += (t.id -> t)
-    }
-
-    def delete(id: String): Unit = synchronized {
-      db -= id
-    }
-
-    def search(value: String): List[Api] = synchronized {
-      log.error("SEARCHING")
-      db.values.filter { api =>
-        val fieldValues: Iterable[String] = api.getFields.values.collect { case s: String => s }
-        log.error(fieldValues.toString())
-        fieldValues.exists(_.matches(s"(?i:.*$value.*)"))
-      }
-    }.toList
-  }
-
   val apiCounter: Counter = statsReceiver.counter(path)
 
-  Apis.save(Api("ID", "Some API", "Some description", Proposed, "Tim"))
+  apis.save(Api("ID", "Some API", "Some description", Proposed, "Tim"))
 
-  val getApis: Router[List[Api]] = get(path) {
-    Apis.list()
-  }
-
-  val searchApis: Router[List[Api]] = get(path ? param("search")) { value: String =>
-    Apis.search(value)
-  }
+  val getApis: Router[List[Api]] =
+    get(path ? paramOption("search")) {
+      value: Option[String] => value.map(apis.search).getOrElse(apis.list())
+    }
 
   val postReader: RequestReader[Api] = {
     body.as[String => Api].map(_(UUID.randomUUID().toString))
   }
 
   val f: PartialFunction[String, State] = {
-    case "Proposed"    => log.error("stateReader called"); Proposed
+    case "Proposed"    => Proposed
     case "Designed"    => Designed
     case "Development" => Development
     case "Production"  => Production
@@ -117,7 +59,7 @@ object ApiEndpoint extends TwitterServer {
 
   val postApi: Router[Api] = post(path ? postReader) { t: Api =>
     apiCounter.incr()
-    Apis.save(t)
+    apis.save(t)
 
     t
   }
@@ -125,15 +67,15 @@ object ApiEndpoint extends TwitterServer {
 
   case class ApiNotFound(id: String) extends Exception(s"Api($id) not found.")
   val deleteApi: Router[Api] = delete(path / string) { id: String =>
-    Apis.get(id) match {
-      case Some(t) => Apis.delete(id); t
+    apis.get(id) match {
+      case Some(t) => apis.delete(id); t
       case None    => throw new ApiNotFound(id)
     }
   }
 
   val deleteApis: Router[List[Api]] = delete(path) {
-    val all: List[Api] = Apis.list()
-    all.foreach(t => Apis.delete(t.id))
+    val all: List[Api] = apis.list()
+    all.foreach(t => apis.delete(t.id))
 
     all
   }
@@ -142,11 +84,11 @@ object ApiEndpoint extends TwitterServer {
 
   val patchApi: Router[Api] =
     patch(path / string ? patchedApi) { (id: String, pa: Api => Api) =>
-      Apis.get(id) match {
+      apis.get(id) match {
         case Some(currentApi) =>
           val newApi: Api = pa(currentApi)
-          Apis.delete(id)
-          Apis.save(newApi)
+          apis.delete(id)
+          apis.save(newApi)
 
           newApi
         case None             => throw ApiNotFound(id)
@@ -161,7 +103,7 @@ object ApiEndpoint extends TwitterServer {
   }
 
   val api: Service[Request, Response] = handleExceptions andThen (
-    searchApis :+: getApis :+: postApi :+: deleteApi :+: deleteApis :+: patchApi
+    getApis :+: postApi :+: deleteApi :+: deleteApis :+: patchApi
     ).toService
 
   def main(): Unit = {
