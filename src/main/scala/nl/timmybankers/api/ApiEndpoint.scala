@@ -26,12 +26,23 @@ object Model {
                  description: String,
                  state: State,
                  owner: String)
+    extends CaseClassReflector
 
   sealed trait State
   case object Proposed extends State
   case object Designed extends State
   case object Development extends State
   case object Production extends State
+
+
+  //Helper
+  trait CaseClassReflector extends Product {
+    def getFields: Map[String, AnyRef] =
+      getClass.getDeclaredFields.map(field => {
+        field setAccessible true
+        field.getName -> field.get(this)
+      }).toMap
+  }
 
 }
 
@@ -59,6 +70,15 @@ object ApiEndpoint extends TwitterServer {
     def delete(id: String): Unit = synchronized {
       db -= id
     }
+
+    def search(value: String): List[Api] = synchronized {
+      log.error("SEARCHING")
+      db.values.filter { api =>
+        val fieldValues: Iterable[String] = api.getFields.values.collect { case s: String => s }
+        log.error(fieldValues.toString())
+        fieldValues.exists(_.matches(s"(?i:.*$value.*)"))
+      }
+    }.toList
   }
 
   val apiCounter: Counter = statsReceiver.counter(path)
@@ -67,6 +87,10 @@ object ApiEndpoint extends TwitterServer {
 
   val getApis: Router[List[Api]] = get(path) {
     Apis.list()
+  }
+
+  val searchApis: Router[List[Api]] = get(path ? param("search")) { value: String =>
+    Apis.search(value)
   }
 
   val postReader: RequestReader[Api] = {
@@ -137,7 +161,7 @@ object ApiEndpoint extends TwitterServer {
   }
 
   val api: Service[Request, Response] = handleExceptions andThen (
-    getApis :+: postApi :+: deleteApi :+: deleteApis :+: patchApi
+    searchApis :+: getApis :+: postApi :+: deleteApi :+: deleteApis :+: patchApi
     ).toService
 
   def main(): Unit = {
