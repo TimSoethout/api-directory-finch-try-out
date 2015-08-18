@@ -69,18 +69,8 @@ object ApiEndpoint extends TwitterServer {
     Apis.list()
   }
 
-  //  def requestReader: RequestReader[Api] = (
-  //    param("id") ::
-  //      param("title") ::
-  //      param("description") ::
-  //      param("state").as[State] ::
-  //      param("owner")
-  //    ).as[Api]
-
   val postReader: RequestReader[Api] = {
-    //    body.as[Api]
     body.as[String => Api].map(_(UUID.randomUUID().toString))
-    //    requestReader //.map(_(UUID.randomUUID().toString))
   }
 
   val f: PartialFunction[String, State] = {
