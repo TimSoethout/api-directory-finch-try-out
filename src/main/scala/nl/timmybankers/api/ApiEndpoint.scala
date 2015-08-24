@@ -2,7 +2,6 @@ package nl.timmybankers.api
 
 import java.util.UUID
 
-import cats.data.Xor
 import com.twitter.app.Flag
 import com.twitter.finagle.httpx.{Request, Response}
 import com.twitter.finagle.param.Stats
@@ -11,16 +10,15 @@ import com.twitter.finagle.{Httpx, ListeningServer, Service, SimpleFilter}
 import com.twitter.server.TwitterServer
 import com.twitter.util.{Await, Future}
 import io.circe.generic.auto._
-import io.circe.{Decoder, DecodingFailure, Encoder, Json}
 import io.finch.circe._
 import io.finch.request._
 import io.finch.response._
 import io.finch.route._
 import nl.timmybankers.api.Model._
-import nl.timmybankers.api.stores.InMemoryStore
+import nl.timmybankers.api.stores.KafkaEventSourcedStore
 
 
-object ApiEndpoint extends TwitterServer with InMemoryStore {
+object ApiEndpoint extends TwitterServer with KafkaEventSourcedStore {
 
   val port: Flag[Int] = flag("port", 8081, "TCP port for HTTP server")
 
@@ -36,26 +34,10 @@ object ApiEndpoint extends TwitterServer with InMemoryStore {
     }
 
   val postReader: RequestReader[Api] = {
+    body.as[Api]
     body.as[String => Api].map(_(UUID.randomUUID().toString))
   }
 
-  val f: PartialFunction[String, State] = {
-    case "Proposed"    => Proposed
-    case "Designed"    => Designed
-    case "Development" => Development
-    case "Production"  => Production
-  }
-
-  implicit val stateDecoder: Decoder[State] = Decoder.instance { c =>
-    val maybeState = for {
-      v <- c.focus.asString
-      o <- f.lift(v)
-    } yield o
-
-    Xor.fromOption(maybeState, DecodingFailure("State", c.history))
-  }
-
-  implicit def stateEncoder: Encoder[State] = Encoder.instance(state => Json.string(state.toString))
 
   val postApi: Router[Api] = post(path ? postReader) { t: Api =>
     apiCounter.incr()
@@ -99,6 +81,7 @@ object ApiEndpoint extends TwitterServer with InMemoryStore {
     def apply(req: Request, service: Service[Request, Response]): Future[Response] =
       service(req).handle {
         case ApiNotFound(id) => NotFound(Map("id" -> id))
+        case _               => NotFound() //TODO is this correct?
       }
   }
 

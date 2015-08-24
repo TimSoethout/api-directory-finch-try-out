@@ -2,6 +2,8 @@ name := "lonely-planet-scala"
 version := "0.0.0"
 scalaVersion := "2.11.7"
 
+// scalacOptions += "-Xlog-implicits"
+
 resolvers += Resolver.sonatypeRepo("snapshots")
 
 resolvers += "TM" at "http://maven.twttr.com"
@@ -11,7 +13,11 @@ libraryDependencies ++= Seq(
   "com.github.finagle" %% "finch-circe" % "0.9.0-SNAPSHOT",
   "io.circe" %% "circe-generic" % "0.2.0-SNAPSHOT",
   "com.twitter" %% "twitter-server" % "1.12.0",
-  "com.twitter" %% "finagle-stats" % "6.27.0"
+  "com.twitter" %% "finagle-stats" % "6.27.0",
+//  "com.cj" %% "kafka-rx" % "0.2.0",
+//  "com.github.okapies" % "finagle-kafka_2.10" % "0.2.0",
+  "com.softwaremill" %% "reactive-kafka" % "0.7.0",
+  "info.batey.kafka" % "kafka-unit" % "0.2"
 )
 
 initialCommands in console :=
