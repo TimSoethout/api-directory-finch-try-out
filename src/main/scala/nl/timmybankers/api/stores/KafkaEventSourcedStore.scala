@@ -23,34 +23,33 @@ trait KafkaEventSourcedStore extends Store {
     implicit val actorSystem = ActorSystem("ReactiveKafka")
     implicit val materializer = ActorMaterializer()
 
+    val topicName = "lonely-planet"
+    val brokerPort = 5001
+    val zkPort = 5000
+
     // For not unit test tool to make sure Kafka is available
-    val kafkaUnitServer = new KafkaUnit(5000, 5001)
+    val kafkaUnitServer = new KafkaUnit(zkPort, brokerPort)
     kafkaUnitServer.startup()
 
     val kafka: ReactiveKafka = new ReactiveKafka()
     val eventLogConsumer = kafka.consume(ConsumerProperties(
-      brokerList = "localhost:5001",
-      zooKeeperHost = "localhost:5000",
-      topic = "lonely-planet",
+      brokerList = s"localhost:$brokerPort",
+      zooKeeperHost = s"localhost:$zkPort",
+      topic = topicName,
       groupId = "groupName",
       decoder = new StringDecoder()
     ))
     val eventLogPublisher = kafka.publish(ProducerProperties(
-      brokerList = "localhost:5001",
-      topic = "lonely-planet",
+      brokerList = s"localhost:$brokerPort",
+      topic = topicName,
       clientId = "groupName",
       encoder = new StringEncoder()
     ))
 
     Source(eventLogConsumer)
-      .map(x => {
-      val json: Json = parse(x).getOrElse(Json.empty)
-      println(s"Read JSON from Kafka: $json")
-      json
-    })
       .map(json => {
       println(s"input for decoding $json")
-      val decoded: Xor[DecodingFailure, Event] = Decoder[ApiAdded].decodeJson(json).orElse(Decoder[ApiRemoved].decodeJson(json))
+      val decoded: Xor[Error, Event] = decode[ApiAdded](json).orElse(decode[ApiRemoved](json))
       println(s"Decoded $decoded")
       decoded
     })
@@ -83,6 +82,7 @@ trait KafkaEventSourcedStore extends Store {
       val encoded: String = Encoder[ApiRemoved].apply(removed).toString()
 
       eventLogPublisher.onNext(encoded)
+      println(s"Wrote to topic $topicName: $encoded")
     }
 
     override def list(): List[Api] = synchronized {
@@ -94,6 +94,7 @@ trait KafkaEventSourcedStore extends Store {
       val encoded: String = Encoder[ApiAdded].apply(added).toString()
 
       eventLogPublisher.onNext(encoded)
+      println(s"Wrote to topic $topicName: $encoded")
     }
 
     override def search(value: String): List[Api] = synchronized {

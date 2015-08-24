@@ -34,7 +34,6 @@ object ApiEndpoint extends TwitterServer with KafkaEventSourcedStore {
     }
 
   val postReader: RequestReader[Api] = {
-    body.as[Api]
     body.as[String => Api].map(_(UUID.randomUUID().toString))
   }
 
@@ -81,13 +80,14 @@ object ApiEndpoint extends TwitterServer with KafkaEventSourcedStore {
     def apply(req: Request, service: Service[Request, Response]): Future[Response] =
       service(req).handle {
         case ApiNotFound(id) => NotFound(Map("id" -> id))
-        case _               => NotFound() //TODO is this correct?
+        case e               => BadRequest(e.toString) //TODO is this correct?
       }
   }
 
-  val api: Service[Request, Response] = handleExceptions andThen (
+  private val service: Service[Request, Response] = (
     getApis :+: postApi :+: deleteApi :+: deleteApis :+: patchApi
     ).toService
+  val api: Service[Request, Response] = handleExceptions andThen service
 
   def main(): Unit = {
     val server: ListeningServer = Httpx.server

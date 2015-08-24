@@ -6,24 +6,23 @@ import io.circe.{Decoder, DecodingFailure, Encoder, Json}
 import nl.timmybankers.api.Model._
 
 object Model {
-  case class Api(id: String,
+  type Id = String
+  case class Api(id: Id,
                  title: String,
                  description: String,
                  state: State,
                  owner: String)
     extends CaseClassReflector
 
-  object Api {
-    implicit val encodeApi: Encoder[Api] = deriveFor[Api].encoder
-    implicit val decodeApi: Decoder[Api] = deriveFor[Api].decoder
-  }
+  implicit val encodeApi: Encoder[Api] = deriveFor[Api].encoder
+  implicit val decodeApi: Decoder[Api] = deriveFor[Api].decoder
 
   //Helper
   trait CaseClassReflector extends Product {
-    def getFields: Map[String, AnyRef] =
+    def getFields: Map[String, String] =
       getClass.getDeclaredFields.map(field => {
         field setAccessible true
-        field.getName -> field.get(this)
+        field.getName -> field.get(this).toString
       }).toMap
   }
 
