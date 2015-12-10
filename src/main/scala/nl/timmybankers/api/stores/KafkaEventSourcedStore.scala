@@ -23,7 +23,7 @@ trait KafkaEventSourcedStore extends Store {
     implicit val actorSystem = ActorSystem("ReactiveKafka")
     implicit val materializer = ActorMaterializer()
 
-    val topicName = "lonely-planet"
+    val topicName = "api-directory"
     val brokerPort = 5001
     val zkPort = 5000
 
