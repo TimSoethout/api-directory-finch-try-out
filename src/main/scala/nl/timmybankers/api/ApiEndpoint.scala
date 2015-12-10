@@ -3,17 +3,18 @@ package nl.timmybankers.api
 import java.util.UUID
 
 import com.twitter.app.Flag
-import com.twitter.finagle.httpx.{Request, Response}
+import com.twitter.finagle
+import com.twitter.finagle.http.{Request, Response}
 import com.twitter.finagle.param.Stats
 import com.twitter.finagle.stats.Counter
-import com.twitter.finagle.{Httpx, ListeningServer, Service, SimpleFilter}
+import com.twitter.finagle._
 import com.twitter.server.TwitterServer
 import com.twitter.util.{Await, Future}
-import io.circe.generic.auto._
+import io.finch._
 import io.finch.circe._
-import io.finch.request._
-import io.finch.response._
-import io.finch.route._
+import io.finch._
+import io.finch.circe._
+import io.circe.generic.auto._
 import nl.timmybankers.api.Model._
 import nl.timmybankers.api.stores.KafkaEventSourcedStore
 
@@ -28,9 +29,9 @@ object ApiEndpoint extends TwitterServer with KafkaEventSourcedStore {
 
   apis.save(Api("ID", "Some API", "Some description", Proposed, "Tim"))
 
-  val getApis: Router[List[Api]] =
+  val getApis: io.finch.Endpoint[List[Api]] =
     get(path ? paramOption("search")) {
-      value: Option[String] => value.map(apis.search).getOrElse(apis.list())
+      value: Option[String] => Ok(value.map(apis.search).getOrElse(apis.list()))
     }
 
   val postReader: RequestReader[Api] = {
@@ -38,49 +39,53 @@ object ApiEndpoint extends TwitterServer with KafkaEventSourcedStore {
   }
 
 
-  val postApi: Router[Api] = post(path ? postReader) { t: Api =>
+  val postApi: Endpoint[Api] = post(path ? postReader) { t: Api =>
     apiCounter.incr()
     apis.save(t)
 
-    t
+    Ok(t)
   }
 
 
   case class ApiNotFound(id: String) extends Exception(s"Api($id) not found.")
-  val deleteApi: Router[Api] = delete(path / string) { id: String =>
-    apis.get(id) match {
-      case Some(t) => apis.delete(id); t
-      case None    => throw new ApiNotFound(id)
+  val deleteApi: Endpoint[Api] = delete(path / string) { id: String =>
+    Ok {
+      apis.get(id) match {
+        case Some(t) => apis.delete(id); t
+        case None => throw new ApiNotFound(id)
+      }
     }
   }
 
-  val deleteApis: Router[List[Api]] = delete(path) {
+  val deleteApis: Endpoint[List[Api]] = delete(path) {
     val all: List[Api] = apis.list()
     all.foreach(t => apis.delete(t.id))
 
-    all
+    Ok(all)
   }
 
   val patchedApi: RequestReader[Api => Api] = body.as[Api => Api]
 
-  val patchApi: Router[Api] =
+  val patchApi: Endpoint[Api] =
     patch(path / string ? patchedApi) { (id: String, pa: Api => Api) =>
-      apis.get(id) match {
-        case Some(currentApi) =>
-          val newApi: Api = pa(currentApi)
-          apis.delete(id)
-          apis.save(newApi)
+      Ok {
+        apis.get(id) match {
+          case Some(currentApi) =>
+            val newApi: Api = pa(currentApi)
+            apis.delete(id)
+            apis.save(newApi)
 
-          newApi
-        case None             => throw ApiNotFound(id)
+            newApi
+          case None => throw ApiNotFound(id)
+        }
       }
     }
 
   val handleExceptions: SimpleFilter[Request, Response] = new SimpleFilter[Request, Response] {
     def apply(req: Request, service: Service[Request, Response]): Future[Response] =
       service(req).handle {
-        case ApiNotFound(id) => NotFound(Map("id" -> id))
-        case e               => BadRequest(e.toString) //TODO is this correct?
+        case ApiNotFound(id) => Response(com.twitter.finagle.http.Status.NotFound) //.NotFound(Map("id" -> id)))
+        case e               => Response(com.twitter.finagle.http.Status.BadRequest) //(e.toString) //TODO is this correct?
       }
   }
 
@@ -90,7 +95,7 @@ object ApiEndpoint extends TwitterServer with KafkaEventSourcedStore {
   val api: Service[Request, Response] = handleExceptions andThen service
 
   def main(): Unit = {
-    val server: ListeningServer = Httpx.server
+    val server: ListeningServer = Http.server
       .configured(Stats(statsReceiver))
       .serve(s":${port()}", api)
 
